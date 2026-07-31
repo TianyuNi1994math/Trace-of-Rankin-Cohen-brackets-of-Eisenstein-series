@@ -1,0 +1,224 @@
+from functools import lru_cache
+
+from sage.all import (
+    ZZ,
+    QQ,
+    bernoulli_polynomial,
+    binomial,
+    divisors,
+    kronecker,
+)
+
+
+def _chi_component(a, modulus, p):
+    r"""
+    Return the relevant character value.
+
+    If modulus = 1, this is the trivial character.
+    If modulus = p, this is chi_p(a) = (a/p).
+    """
+    a = ZZ(a)
+    modulus = ZZ(modulus)
+    p = ZZ(p)
+
+    if modulus == 1:
+        return ZZ(1)
+
+    if modulus == p:
+        return ZZ(kronecker(a, p))
+
+    raise ValueError(
+        "For prime p, the character factor must have modulus 1 or p."
+    )
+
+
+@lru_cache(maxsize=None)
+def _L_one_minus_m(m, modulus, p):
+    r"""
+    Compute L(1-m, chi) exactly.
+
+    The character chi is:
+        - the trivial character if modulus = 1;
+        - chi_p if modulus = p.
+
+    We use
+
+        L(1-m, chi)
+          = -f^(m-1)/m * sum_{a=1}^f chi(a) B_m(a/f),
+
+    where f is the modulus.
+    """
+    m = ZZ(m)
+    modulus = ZZ(modulus)
+    p = ZZ(p)
+
+    if m < 1:
+        raise ValueError("m must be positive.")
+
+    f = modulus
+    total = QQ(0)
+
+    for a in range(1, int(f) + 1):
+        x = QQ(a) / f
+        total += (
+            _chi_component(a, f, p)
+            * bernoulli_polynomial(x, m)
+        )
+
+    return -(QQ(f ** (m - 1)) / m) * total
+
+
+@lru_cache(maxsize=None)
+def _twisted_sigma(m, weight, D1, D2, p):
+    r"""
+    Compute sigma_{weight-1, chi_1, chi_2}(m).
+
+    Here chi_i is trivial when D_i = 1 and is chi_p when D_i = p.
+    """
+    m = ZZ(m)
+    weight = ZZ(weight)
+    D1 = ZZ(D1)
+    D2 = ZZ(D2)
+    p = ZZ(p)
+
+    if m < 0:
+        raise ValueError("The divisor-function argument must be nonnegative.")
+
+    # Constant coefficient of the Eisenstein series.
+    if m == 0:
+        return (
+            -_L_one_minus_m(weight, D1, p)
+            * _L_one_minus_m(1, D2, p)
+        )
+
+    answer = QQ(0)
+
+    for d1 in divisors(m):
+        d2 = m // d1
+
+        answer += (
+            _chi_component(d1, D1, p)
+            * _chi_component(d2, D2, p)
+            * d1 ** (weight - 1)
+        )
+
+    return answer
+
+
+def _rankin_cohen_factor(c, a1, a2, k1, k2):
+    r"""
+    Compute
+
+        C_c(a1,a2)
+          = sum_{r=0}^c (-1)^r a1^r a2^(c-r)
+              binomial(c+k1-1,c-r) binomial(c+k2-1,r).
+    """
+    c = ZZ(c)
+    a1 = ZZ(a1)
+    a2 = ZZ(a2)
+    k1 = ZZ(k1)
+    k2 = ZZ(k2)
+
+    return sum(
+        ZZ(-1) ** r
+        * a1 ** r
+        * a2 ** (c - r)
+        * binomial(c + k1 - 1, c - r)
+        * binomial(c + k2 - 1, r)
+        for r in range(int(c) + 1)
+    )
+
+
+def a_p_k1_k2_c(p, k1, k2, c, n):
+    r"""
+    Return a_{p,k1,k2,c}(n; chi_p) exactly.
+
+    INPUT:
+
+        p  -- an odd prime
+        k1 -- first weight
+        k2 -- second weight
+        c  -- Rankin-Cohen order
+        n  -- positive Fourier index
+
+    The hypotheses from the paper are checked:
+
+        3 <= k1 <= k2,
+        k1 == k2 (mod 2),
+        chi_p(-1) = (-1)^k1.
+
+    OUTPUT:
+
+        An exact rational number in QQ.
+    """
+    p, k1, k2, c, n = map(ZZ, (p, k1, k2, c, n))
+
+    if p <= 2 or not p.is_prime():
+        raise ValueError("p must be an odd prime.")
+
+    if k1 < 3 or k2 < k1:
+        raise ValueError("The weights must satisfy 3 <= k1 <= k2.")
+
+    if (k1 - k2) % 2 != 0:
+        raise ValueError("k1 and k2 must have the same parity.")
+
+    if c < 0:
+        raise ValueError("c must be nonnegative.")
+
+    if n < 1:
+        raise ValueError("n must be positive.")
+
+    if _chi_component(-1, p, p) != ZZ(-1) ** k1:
+        raise ValueError(
+            "The parity condition chi_p(-1) = (-1)^k1 is not satisfied."
+        )
+
+    answer = QQ(0)
+
+    # The two factorizations p = D1*D2:
+    #     (D1,D2) = (1,p) and (p,1).
+    for D1, D2 in ((ZZ(1), p), (p, ZZ(1))):
+
+        N = n * D2
+        inner_sum = QQ(0)
+
+        for a1_integer in range(int(N) + 1):
+            a1 = ZZ(a1_integer)
+            a2 = N - a1
+
+            inner_sum += (
+                _twisted_sigma(a1, k1, D1, D2, p)
+                * _twisted_sigma(a2, k2, D1, D2, p)
+                * _rankin_cohen_factor(c, a1, a2, k1, k2)
+            )
+
+        outer_factor = (
+            QQ(_chi_component(-1, D2, p))
+            / D2 ** c
+        )
+
+        answer += outer_factor * inner_sum
+
+    return answer
+
+
+def normalized_a_p_k1_k2_c(p, k1, k2, c, n):
+    r"""
+    Return the normalized coefficient
+
+        a_{p,k1,k2,c}(n;chi_p)
+        --------------------------------.
+        a_{p,k1,k2,c}(1;chi_p)
+    """
+    first_coefficient = a_p_k1_k2_c(p, k1, k2, c, 1)
+
+    if first_coefficient == 0:
+        raise ZeroDivisionError(
+            "The first Fourier coefficient is zero."
+        )
+
+    return (
+        a_p_k1_k2_c(p, k1, k2, c, n)
+        / first_coefficient
+    )
+    
