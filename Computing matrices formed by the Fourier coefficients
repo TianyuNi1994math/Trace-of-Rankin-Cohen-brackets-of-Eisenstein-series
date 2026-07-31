@@ -1,0 +1,176 @@
+from sage.all import ZZ, QQ, matrix
+
+
+# Default parameters used by prime_fourier_matrix(p1, ..., pd).
+DEFAULT_K1 = ZZ(3)
+DEFAULT_K2 = ZZ(7)
+DEFAULT_C = ZZ(1)
+
+
+def _validate_matrix_primes(primes, k1):
+    """
+    Validate the primes and the parity condition
+
+        chi_p(-1) = (-1)^k1.
+    """
+    prime_list = [ZZ(p) for p in primes]
+    k1 = ZZ(k1)
+
+    if len(prime_list) == 0:
+        raise ValueError("At least one prime must be supplied.")
+
+    invalid_primes = [
+        p for p in prime_list
+        if p <= 2 or not p.is_prime()
+    ]
+
+    if invalid_primes:
+        raise ValueError(
+            "Every p_i must be an odd prime. "
+            "Invalid entries: {}".format(invalid_primes)
+        )
+
+    wrong_parity = [
+        p for p in prime_list
+        if ZZ(kronecker(-1, p)) != ZZ(-1) ** k1
+    ]
+
+    if wrong_parity:
+        required_class = 3 if k1 % 2 == 1 else 1
+
+        raise ValueError(
+            "For k1={}, every prime must satisfy "
+            "p_i == {} (mod 4). Offending primes: {}".format(
+                k1,
+                required_class,
+                wrong_parity,
+            )
+        )
+
+    return prime_list
+
+
+def build_fourier_matrix(primes, k1, k2, c):
+    r"""
+    Return the d by d matrix
+
+        A[i,j] = a_{p_i,k1,k2,c}(j; chi_{p_i}),
+
+    for 1 <= i,j <= d.
+
+    Rows correspond to the primes p_i.
+    Columns correspond to n = 1,...,d.
+    """
+    k1, k2, c = map(ZZ, (k1, k2, c))
+
+    if k1 < 3 or k2 < k1:
+        raise ValueError("Require 3 <= k1 <= k2.")
+
+    if (k1 - k2) % 2 != 0:
+        raise ValueError("k1 and k2 must have the same parity.")
+
+    if c < 0:
+        raise ValueError("c must be nonnegative.")
+
+    prime_list = _validate_matrix_primes(primes, k1)
+    d = len(prime_list)
+
+    rows = [
+        [
+            a_p_k1_k2_c(p, k1, k2, c, n)
+            for n in range(1, d + 1)
+        ]
+        for p in prime_list
+    ]
+
+    return matrix(QQ, rows)
+
+
+def analyze_fourier_matrix(
+    primes,
+    k1,
+    k2,
+    c,
+    print_output=True,
+):
+    r"""
+    Construct the Fourier-coefficient matrix and determine whether
+    it is singular.
+
+    OUTPUT:
+
+        (A, determinant, status)
+
+    where status is either "singular" or "non-singular".
+    """
+    prime_list = _validate_matrix_primes(primes, k1)
+
+    A = build_fourier_matrix(
+        prime_list,
+        k1,
+        k2,
+        c,
+    )
+
+    determinant = A.det()
+
+    if determinant == 0:
+        status = "singular"
+    else:
+        status = "non-singular"
+
+    if print_output:
+        print("Primes p_i: {}".format(prime_list))
+        print(
+            "Parameters: k1={}, k2={}, c={}".format(
+                k1,
+                k2,
+                c,
+            )
+        )
+
+        print(
+            "Rows correspond to p_i; "
+            "columns correspond to n=1,...,d."
+        )
+
+        print("\nFourier coefficient matrix A =")
+        print(A)
+
+        print("\ndet(A) = {}".format(determinant))
+        print("Status: {}".format(status))
+
+    return A, determinant, status
+
+
+def prime_fourier_matrix(*primes):
+    r"""
+    Main interface requested by the problem.
+
+    INPUT:
+
+        prime_fourier_matrix(p1, p2, ..., pd)
+
+    A list or tuple is also accepted:
+
+        prime_fourier_matrix([p1, p2, ..., pd])
+
+    The function prints and returns:
+
+        1. the d by d matrix;
+        2. its determinant;
+        3. "singular" or "non-singular".
+    """
+    if len(primes) == 1 and isinstance(
+        primes[0],
+        (list, tuple),
+    ):
+        primes = tuple(primes[0])
+
+    return analyze_fourier_matrix(
+        primes,
+        DEFAULT_K1,
+        DEFAULT_K2,
+        DEFAULT_C,
+        print_output=True,
+    )
