@@ -1,0 +1,253 @@
+from itertools import combinations
+from sage.all import ZZ, QQ, binomial, matrix
+
+
+def nonsingular_row_minors(T, row_labels=None):
+    r"""
+    Test all maximal square matrices obtained by selecting rows of T.
+
+    If T has r rows and m columns, with r >= m, this tests all
+    m by m matrices obtained by selecting m of the rows.
+
+    OUTPUT:
+
+        A list of triples
+
+            (row_indices, row_labels, determinant)
+
+        corresponding to the nonsingular minors.
+    """
+    number_of_rows = T.nrows()
+    order = T.ncols()
+
+    if number_of_rows < order:
+        raise ValueError(
+            "T must have at least as many rows as columns."
+        )
+
+    if row_labels is None:
+        row_labels = list(range(number_of_rows))
+    else:
+        row_labels = list(row_labels)
+
+    if len(row_labels) != number_of_rows:
+        raise ValueError("The number of row labels is incorrect.")
+
+    answer = []
+
+    for rows in combinations(range(number_of_rows), order):
+        submatrix = matrix(
+            QQ,
+            [
+                [T[i, j] for j in range(order)]
+                for i in rows
+            ],
+        )
+
+        determinant = submatrix.det()
+
+        if determinant != 0:
+            answer.append(
+                (
+                    tuple(rows),
+                    tuple(row_labels[i] for i in rows),
+                    determinant,
+                )
+            )
+
+    return answer
+
+
+def analyze_F(
+    d,
+    *data,
+    displayed_coefficients=None,
+    print_full_matrix=True,
+    print_all_nonzero_minors=False
+):
+    r"""
+    Input:
+
+        analyze_F(d, p1, p2, ..., pd, k1, k2, c)
+
+    The full coefficient matrix is
+
+        M[i-1,n-1]
+          = a_{p_i,k1,k2,c}(n; chi_{p_i}),
+
+    for 1 <= i,n <= d.
+
+    By default, all first d coefficients are printed.
+
+    OPTIONAL INPUT:
+
+        displayed_coefficients=m
+
+    prints only the coefficients n=1,...,m, while still constructing
+    and testing the full d by d matrix.
+
+    OUTPUT:
+
+        A dictionary containing:
+
+            "matrix"                       full d by d matrix
+            "determinant"                  determinant of full matrix
+            "rank"                         rank of full matrix
+            "status"                       singular/non-singular
+            "displayed_matrix"             first displayed columns
+            "displayed_rank"               rank of displayed table
+            "nonzero_displayed_minors"     nonsingular maximal minors
+    """
+    d = ZZ(d)
+    d_integer = int(d)
+
+    if d < 1:
+        raise ValueError("d must be positive.")
+
+    # After d, the input must contain d primes and then k1,k2,c.
+    if len(data) != d_integer + 3:
+        raise ValueError(
+            "Input must be (d,p1,...,pd,k1,k2,c). "
+            "Expected {} arguments after d, but received {}."
+            .format(d_integer + 3, len(data))
+        )
+
+    p_list = [ZZ(p) for p in data[:d_integer]]
+    k1, k2, c = map(ZZ, data[d_integer:])
+
+    if displayed_coefficients is None:
+        number_displayed = d_integer
+    else:
+        number_displayed = int(ZZ(displayed_coefficients))
+
+    if not (1 <= number_displayed <= d_integer):
+        raise ValueError(
+            "displayed_coefficients must be between 1 and d."
+        )
+
+    # Construct the full d by d matrix.
+    M = matrix(
+        QQ,
+        [
+            [
+                a_p_k1_k2_c(p, k1, k2, c, n)
+                for n in range(1, d_integer + 1)
+            ]
+            for p in p_list
+        ],
+    )
+
+    # Matrix containing only the coefficients requested for display.
+    T = matrix(
+        QQ,
+        [
+            [
+                M[i, j]
+                for j in range(number_displayed)
+            ]
+            for i in range(d_integer)
+        ],
+    )
+
+    determinant = M.det()
+    rank = M.rank()
+    status = (
+        "non-singular"
+        if determinant != 0
+        else "singular"
+    )
+
+    nonzero_minors = nonsingular_row_minors(
+        T,
+        row_labels=p_list,
+    )
+
+    total_maximal_minors = binomial(
+        d_integer,
+        number_displayed,
+    )
+
+    print("=" * 72)
+    print(
+        "F_(p,{},{},{}) for p in {}"
+        .format(k1, k2, c, tuple(p_list))
+    )
+    print(
+        "Total weight k1+k2+2c = {}"
+        .format(k1 + k2 + 2*c)
+    )
+    print(
+        "Displayed coefficients: n=1,...,{}"
+        .format(number_displayed)
+    )
+
+    for i, p in enumerate(p_list):
+        coefficients = [
+            T[i, j]
+            for j in range(number_displayed)
+        ]
+
+        print(
+            "p = {}: {}"
+            .format(str(p).rjust(3), coefficients)
+        )
+
+    if print_full_matrix:
+        print("\nFull d by d coefficient matrix M:")
+        print(M)
+
+    print("\nFull d by d matrix:")
+    print("det(M) = {}".format(determinant))
+    print("rank(M) = {}".format(rank))
+    print("status = {}".format(status))
+
+    print("\nDisplayed coefficient table:")
+    print(
+        "size = {} by {}"
+        .format(T.nrows(), T.ncols())
+    )
+    print("rank = {}".format(T.rank()))
+    print(
+        "nonsingular {} by {} row minors: {} out of {}"
+        .format(
+            number_displayed,
+            number_displayed,
+            len(nonzero_minors),
+            total_maximal_minors,
+        )
+    )
+
+    if nonzero_minors:
+        _, prime_labels, minor_determinant = nonzero_minors[0]
+
+        print(
+            "First nonsingular minor: p = {}"
+            .format(prime_labels)
+        )
+        print(
+            "Its determinant is {}"
+            .format(minor_determinant)
+        )
+    else:
+        print("No nonsingular maximal row minor was found.")
+
+    if print_all_nonzero_minors:
+        print("\nAll nonsingular maximal row minors:")
+
+        for _, prime_labels, minor_determinant in nonzero_minors:
+            print(
+                "p = {}: determinant = {}"
+                .format(prime_labels, minor_determinant)
+            )
+
+    return {
+        "primes": tuple(p_list),
+        "parameters": (k1, k2, c),
+        "matrix": M,
+        "determinant": determinant,
+        "rank": rank,
+        "status": status,
+        "displayed_matrix": T,
+        "displayed_rank": T.rank(),
+        "nonzero_displayed_minors": nonzero_minors,
+    }
